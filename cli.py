@@ -1,72 +1,62 @@
-# cli.py
 import argparse
 import yaml
+import os
 
-def generate_deployment(name, image, replicas, port):
+def parse_prompt(prompt: str):
+    """Simple keyword detection."""
+    steps = []
+    prompt = prompt.lower()
+    if "preprocess" in prompt:
+        steps.append("preprocess")
+    if "train" in prompt:
+        steps.append("train")
+    if "deploy" in prompt:
+        steps.append("deploy")
+    if not steps:
+        steps.append("preprocess")
+    return steps
+
+def generate_pipeline(steps: list):
+    """Generate Kubeflow Pipeline YAML from identified steps."""
     return {
-        "apiVersion": "apps/v1",
-        "kind": "Deployment",
-        "metadata": {"name": name},
+        "apiVersion": "argoproj.io/v1alpha1",
+        "kind": "Workflow",
+        "metadata": {"generateName": "pipeline-"},
         "spec": {
-            "replicas": replicas,
-            "selector": {
-                "matchLabels": {"app": name}
-            },
-            "template": {
-                "metadata": {"labels": {"app": name}},
-                "spec": {
-                    "containers": [{
-                        "name": name,
-                        "image": image,  # Use dynamic image
-                        "ports": [{"containerPort": port}]
-                    }]
-                }
-            }
+            "entrypoint": "main",
+            "templates": [
+                {
+                    "name": "main",
+                    "steps": [[{"name": step, "template": step} for step in steps]]
+                },
+                *[{
+                    "name": step,
+                    "container": {
+                        "image": f"kubeflow/{step}:latest",
+                        "command": ["python", f"/app/{step}.py"]
+                    }
+                } for step in steps]
+            ]
         }
     }
 
-def parse_prompt(prompt: str):
-    """Parses the prompt to extract deployment details."""
-    name = "my-app"
-    image = "nginx"  # Default image
-
-    if "flask" in prompt.lower():
-        name, image = "flask-app", "python:3.9"
-    elif "node" in prompt.lower():
-        name, image = "node-app", "node:20"
-    elif "redis" in prompt.lower():
-        name, image = "redis-db", "redis"
-
-    replicas = 1
-    if "replicas" in prompt.lower():
-        try:
-            replicas = int(prompt.lower().split("replicas")[1].split()[0])
-        except (IndexError, ValueError):
-            pass  # Keep default if parsing fails
-
-    port = 80
-    if "port" in prompt.lower():
-        try:
-            port = int(prompt.lower().split("port")[1].split()[0])
-        except (IndexError, ValueError):
-            pass  # Keep default if parsing fails
-
-    return name, image, replicas, port
-
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Deploy apps with English!")
-    parser.add_argument("--prompt", type=str, required=True)
-    parser.add_argument("--dry-run", action="store_true")  # Corrected placement
+    parser = argparse.ArgumentParser(description="Generate Kubeflow Pipelines from natural language prompts.")
+    parser.add_argument("--prompt", type=str, required=True, help="Description of desired pipeline.")
     args = parser.parse_args()
 
-    name, image, replicas, port = parse_prompt(args.prompt)
-    yaml_output = generate_deployment(name, image, replicas, port)
+    try:
+        steps = parse_prompt(args.prompt)
+        pipeline_config = generate_pipeline(steps)
 
-    if args.dry_run:
-        print(yaml.dump(yaml_output, default_flow_style=False))
-        exit()  # Exit here properly
+        os.makedirs("build", exist_ok=True)
+        with open("build/pipeline.yaml", "w") as f:
+            yaml.dump(pipeline_config, f, sort_keys=False, default_flow_style=False)
 
-    with open("deployment.yaml", "w") as f:
-        yaml.dump(yaml_output, f, default_flow_style=False)
+        print("✅ Successfully generated build/pipeline.yaml!")
+        print(f"📋 Detected steps: {', '.join(steps)}")
 
-    print("Generated deployment.yaml!")
+    except Exception as e:
+        print(f"❌ Error: {str(e)}")
+        exit(1)
+

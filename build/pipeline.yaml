@@ -1,0 +1,33 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Workflow
+metadata:
+  generateName: pipeline-
+spec:
+  entrypoint: main
+  templates:
+  - name: main
+    steps:
+    - - name: preprocess
+        template: preprocess
+      - name: train
+        template: train
+      - name: deploy
+        template: deploy
+  - name: preprocess
+    container:
+      image: kubeflow/preprocess:latest
+      command:
+      - python
+      - /app/preprocess.py
+  - name: train
+    container:
+      image: kubeflow/train:latest
+      command:
+      - python
+      - /app/train.py
+  - name: deploy
+    container:
+      image: kubeflow/deploy:latest
+      command:
+      - python
+      - /app/deploy.py
